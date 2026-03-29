@@ -49,10 +49,38 @@ bash <(curl -Ls https://raw.githubusercontent.com/Valerrra/3x-ui_plus/main/insta
 После установки:
 
 1. Откройте панель и войдите с учётными данными, которые покажет инсталлятор.
-2. Создайте новый inbound и выберите протокол `TrustTunnel` или `MTProto`.
-3. Для `TrustTunnel` используйте кнопки автозаполнения для hostname, public address и путей к сертификатам.
-4. Добавляйте пользователей `TrustTunnel` через меню inbound и сразу экспортируйте `tt://` или QR-код из панели.
-5. Для `MTProto` можно оставить поле `secret` пустым, тогда панель сгенерирует корректное значение автоматически.
+2. Установите runtime-бинарники, которые ожидает этот форк:
+
+```bash
+sudo mkdir -p /opt/trusttunnel/access /opt/trusttunnel/certs
+
+# Установите TrustTunnel из официального проекта и убедитесь, что endpoint-бинарь доступен здесь:
+sudo install -m 755 /path/to/trusttunnel_endpoint /usr/local/bin/trusttunnel_endpoint
+
+# Установите MTProto bridge (mtg) и убедитесь, что бинарь доступен здесь:
+sudo install -m 755 /path/to/mtg /usr/local/bin/mtg
+```
+
+3. Подготовьте сертификаты для TrustTunnel inbound, например так:
+
+```bash
+sudo cp /path/to/fullchain.pem /opt/trusttunnel/certs/fullchain.pem
+sudo cp /path/to/privkey.pem /opt/trusttunnel/certs/privkey.pem
+sudo chmod 600 /opt/trusttunnel/certs/privkey.pem
+```
+
+4. Создайте новый inbound и выберите протокол `TrustTunnel` или `MTProto`.
+5. Для `TrustTunnel` используйте кнопки автозаполнения для hostname, public address и путей к сертификатам, затем сохраните inbound. Панель сама запишет:
+   - `/opt/trusttunnel/vpn.toml`
+   - `/opt/trusttunnel/hosts.toml`
+   - `/opt/trusttunnel/credentials.toml`
+6. Добавляйте пользователей `TrustTunnel` через меню inbound и сразу экспортируйте `tt://` или QR-код из панели.
+7. Для `MTProto` можно оставить поле `secret` пустым, тогда панель сгенерирует корректное значение автоматически. Панель запишет `/opt/trusttunnel/access/mtproto.toml` и будет управлять `trusttunnel-mtproto.service`.
+
+Если бинарники установлены в другие места, поправьте пути или добавьте симлинки так, чтобы форк видел:
+
+- `/usr/local/bin/trusttunnel_endpoint`
+- `/usr/local/bin/mtg`
 
 Полную документацию смотрите в [вики проекта](https://github.com/MHSanaei/3x-ui/wiki).
 

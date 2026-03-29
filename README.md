@@ -49,10 +49,38 @@ bash <(curl -Ls https://raw.githubusercontent.com/Valerrra/3x-ui_plus/main/insta
 After installation:
 
 1. Open the panel and sign in with the generated credentials.
-2. Create a new inbound and choose `TrustTunnel` or `MTProto` from the protocol list.
-3. For `TrustTunnel`, use the auto-fill helpers for hostname, public address, and certificate paths.
-4. Add `TrustTunnel` users from the inbound menu and export `tt://` links or QR codes directly from the panel.
-5. For `MTProto`, leave the secret empty to auto-generate a valid value on save.
+2. Install the runtime binaries expected by this fork:
+
+```bash
+sudo mkdir -p /opt/trusttunnel/access /opt/trusttunnel/certs
+
+# Install TrustTunnel from the official project and make sure the endpoint binary is available here:
+sudo install -m 755 /path/to/trusttunnel_endpoint /usr/local/bin/trusttunnel_endpoint
+
+# Install MTProto bridge (mtg) and make sure it is available here:
+sudo install -m 755 /path/to/mtg /usr/local/bin/mtg
+```
+
+3. Prepare your certificate files for the TrustTunnel inbound, for example:
+
+```bash
+sudo cp /path/to/fullchain.pem /opt/trusttunnel/certs/fullchain.pem
+sudo cp /path/to/privkey.pem /opt/trusttunnel/certs/privkey.pem
+sudo chmod 600 /opt/trusttunnel/certs/privkey.pem
+```
+
+4. Create a new inbound and choose `TrustTunnel` or `MTProto` from the protocol list.
+5. For `TrustTunnel`, use the auto-fill helpers for hostname, public address, and certificate paths, then save the inbound. The panel will write:
+   - `/opt/trusttunnel/vpn.toml`
+   - `/opt/trusttunnel/hosts.toml`
+   - `/opt/trusttunnel/credentials.toml`
+6. Add `TrustTunnel` users from the inbound menu and export `tt://` links or QR codes directly from the panel.
+7. For `MTProto`, leave the secret empty to auto-generate a valid value on save. The panel will write `/opt/trusttunnel/access/mtproto.toml` and manage `trusttunnel-mtproto.service`.
+
+If you install binaries in different paths, adjust them or place symlinks so this fork can find:
+
+- `/usr/local/bin/trusttunnel_endpoint`
+- `/usr/local/bin/mtg`
 
 For full documentation, please visit the [project Wiki](https://github.com/MHSanaei/3x-ui/wiki).
 

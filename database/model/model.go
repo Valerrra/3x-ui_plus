@@ -21,6 +21,8 @@ const (
 	Shadowsocks Protocol = "shadowsocks"
 	Mixed       Protocol = "mixed"
 	WireGuard   Protocol = "wireguard"
+	TrustTunnel Protocol = "trusttunnel"
+	MTProto     Protocol = "mtproto"
 )
 
 // User represents a user account in the 3x-ui panel.

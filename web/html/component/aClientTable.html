@@ -1,8 +1,12 @@
 {{define "component/aClientTable"}}
 <template slot="actions" slot-scope="text, client, index">
   <a-tooltip>
+    <template slot="title">Copy TrustTunnel tt://</template>
+    <a-icon :style="{ fontSize: '22px', marginInlineStart: '14px' }" class="normal-icon" type="link" v-if="record.isTrustTunnel" @click="exportTrustTunnelClient(record.id,client);"></a-icon>
+  </a-tooltip>
+  <a-tooltip>
     <template slot="title">{{ i18n "qrCode" }}</template>
-    <a-icon :style="{ fontSize: '22px', marginInlineStart: '14px' }" class="normal-icon" type="qrcode" v-if="record.hasLink()" @click="showQrcode(record.id,client);"></a-icon>
+    <a-icon :style="{ fontSize: '22px', marginInlineStart: '14px' }" class="normal-icon" type="qrcode" v-if="record.hasLink() || record.isTrustTunnel" @click="showQrcode(record.id,client);"></a-icon>
   </a-tooltip>
   <a-tooltip>
     <template slot="title">{{ i18n "pages.client.edit" }}</template>
@@ -144,9 +148,13 @@
   <a-dropdown :trigger="['click']">
     <a-icon @click="e => e.preventDefault()" type="ellipsis" :style="{ fontSize: '20px' }"></a-icon>
     <a-menu slot="overlay" :theme="themeSwitcher.currentTheme">
-      <a-menu-item v-if="record.hasLink()" @click="showQrcode(record.id,client);">
+      <a-menu-item v-if="record.hasLink() || record.isTrustTunnel" @click="showQrcode(record.id,client);">
         <a-icon :style="{ fontSize: '14px' }" type="qrcode"></a-icon>
         {{ i18n "qrCode" }}
+      </a-menu-item>
+      <a-menu-item v-if="record.isTrustTunnel" @click="exportTrustTunnelClient(record.id,client);">
+        <a-icon :style="{ fontSize: '14px' }" type="link"></a-icon>
+        Copy TrustTunnel tt://
       </a-menu-item>
       <a-menu-item @click="openEditClient(record.id,client);">
         <a-icon :style="{ fontSize: '14px' }" type="edit"></a-icon>

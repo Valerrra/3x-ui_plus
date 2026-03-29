@@ -1,0 +1,363 @@
+{{ template "page/head_start" .}}
+{{ template "page/head_end" .}}
+
+{{ template "page/body_start" .}}
+<a-layout id="app" v-cloak :class="themeSwitcher.currentTheme + ' services-page'">
+  <a-sidebar></a-sidebar>
+  <a-layout id="content-layout">
+    <a-layout-content>
+      <a-spin :spinning="loading" :delay="200" tip="Loading">
+        <a-row :gutter="[16, 16]" style="margin-bottom: 16px;">
+          <a-col :xs="24" :lg="16">
+            <a-card title="TrustTunnel" hoverable>
+              <a-form layout="vertical">
+                <a-row :gutter="[12, 0]">
+                  <a-col :xs="24" :md="10">
+                    <a-form-item label="Hostname">
+                      <a-input v-model="trustTunnel.hostname"></a-input>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :md="8">
+                    <a-form-item label="Public Address">
+                      <a-input v-model="trustTunnel.publicAddress" placeholder="Leave empty to mirror hostname"></a-input>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="12" :md="4">
+                    <a-form-item label="Listen Host">
+                      <a-input v-model="trustTunnel.listenHost"></a-input>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="12" :md="2">
+                    <a-form-item label="Port">
+                      <a-input-number v-model="trustTunnel.listenPort" :min="1" :max="65535" style="width: 100%;"></a-input-number>
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+
+                <a-row :gutter="[12, 0]">
+                  <a-col :xs="24" :md="8">
+                    <a-form-item label="Credentials File">
+                      <a-input v-model="trustTunnel.credentialsFile"></a-input>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :md="8">
+                    <a-form-item label="Certificate Chain">
+                      <a-input v-model="trustTunnel.certChainPath"></a-input>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="24" :md="8">
+                    <a-form-item label="Private Key">
+                      <a-input v-model="trustTunnel.privateKeyPath"></a-input>
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+
+                <a-space>
+                  <a-button type="primary" @click="saveTrustTunnel()">Save TrustTunnel</a-button>
+                  <a-button @click="loadTrustTunnel()">Reload</a-button>
+                  <a-button @click="runAction('trusttunnel', 'restart')">Restart Core</a-button>
+                  <a-button @click="runAction('trusttunnel-webui', 'restart')">Restart WebUI</a-button>
+                </a-space>
+              </a-form>
+            </a-card>
+          </a-col>
+
+          <a-col :xs="24" :lg="8">
+            <a-card title="MTProto" hoverable>
+              <a-form layout="vertical">
+                <a-row :gutter="[12, 0]">
+                  <a-col :xs="24" :md="12" :lg="24">
+                    <a-form-item label="Bind Host">
+                      <a-input v-model="mtproto.bindHost"></a-input>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="12" :md="6" :lg="12">
+                    <a-form-item label="Port">
+                      <a-input-number v-model="mtproto.port" :min="1" :max="65535" style="width: 100%;"></a-input-number>
+                    </a-form-item>
+                  </a-col>
+                  <a-col :xs="12" :md="6" :lg="12">
+                    <a-form-item label="Config Path">
+                      <a-input v-model="mtproto.configPath"></a-input>
+                    </a-form-item>
+                  </a-col>
+                </a-row>
+                <a-form-item label="Secret">
+                  <a-input v-model="mtproto.secret"></a-input>
+                </a-form-item>
+                <a-space>
+                  <a-button type="primary" @click="saveMTProto()">Save MTProto</a-button>
+                  <a-button @click="loadMTProto()">Reload</a-button>
+                  <a-button @click="runAction('trusttunnel-mtproto', 'restart')">Restart MTProto</a-button>
+                </a-space>
+              </a-form>
+            </a-card>
+          </a-col>
+        </a-row>
+
+        <a-row :gutter="[16, 16]">
+          <a-col :xs="24" :lg="12" v-for="item in services" :key="item.key">
+            <a-card hoverable>
+              <template #title>
+                <a-space>
+                  <a-icon type="deployment-unit"></a-icon>
+                  <span>[[ item.title ]]</span>
+                </a-space>
+              </template>
+              <template #extra>
+                <a-tag :color="item.active ? 'green' : 'orange'">[[ item.state ]]</a-tag>
+              </template>
+
+              <a-space direction="vertical" :size="10" style="width: 100%;">
+                <div class="ant-text-secondary">[[ item.description ]]</div>
+                <div><strong>Unit:</strong> <code>[[ item.unit ]]</code></div>
+                <div><strong>Config:</strong> <code>[[ item.configPath || '—' ]]</code></div>
+                <div><strong>Binary:</strong> <code>[[ item.binaryPath || '—' ]]</code></div>
+                <a-space>
+                  <a-button type="primary" size="small" @click="runAction(item.key, 'start')">Start</a-button>
+                  <a-button size="small" @click="runAction(item.key, 'restart')">Restart</a-button>
+                  <a-button type="danger" size="small" @click="runAction(item.key, 'stop')">Stop</a-button>
+                </a-space>
+              </a-space>
+            </a-card>
+          </a-col>
+        </a-row>
+        <a-divider orientation="left">TrustTunnel Clients</a-divider>
+        <a-card hoverable style="margin-bottom: 16px;">
+          <a-form layout="inline">
+            <a-form-item label="Username">
+              <a-input v-model="clientDraft.username" placeholder="Leave empty to autogenerate"></a-input>
+            </a-form-item>
+            <a-form-item label="Password">
+              <a-input v-model="clientDraft.password" placeholder="Leave empty to autogenerate"></a-input>
+            </a-form-item>
+            <a-form-item>
+              <a-button type="primary" @click="createTrustTunnelClient()">Create Client</a-button>
+            </a-form-item>
+          </a-form>
+        </a-card>
+        <a-table
+          :columns="clientColumns"
+          :data-source="trustTunnelClients"
+          row-key="username"
+          size="small"
+          :pagination="{ pageSize: 8 }">
+          <template slot="password" slot-scope="text">
+            <code>[[ text ]]</code>
+          </template>
+          <template slot="actions" slot-scope="text, record">
+            <a-space>
+              <a-button size="small" @click="exportTrustTunnelClient(record.username)">Export tt://</a-button>
+              <a-button size="small" type="danger" @click="deleteTrustTunnelClient(record.username)">Delete</a-button>
+            </a-space>
+          </template>
+        </a-table>
+        <a-card v-if="exportedLink" size="small" style="margin-top: 16px;">
+          <template #title>Exported Deep Link</template>
+          <a-input :value="exportedLink" read-only></a-input>
+        </a-card>
+        <a-divider orientation="left">Configs</a-divider>
+        <a-row :gutter="[16, 16]">
+          <a-col :xs="24" v-for="cfg in configs" :key="cfg.key">
+            <a-card>
+              <template #title>
+                <a-space>
+                  <a-icon type="file-text"></a-icon>
+                  <span>[[ cfg.title ]]</span>
+                </a-space>
+              </template>
+              <template #extra>
+                <a-button size="small" @click="loadConfig(cfg.key)">Reload</a-button>
+              </template>
+              <a-space direction="vertical" :size="10" style="width: 100%;">
+                <div class="ant-text-secondary">[[ cfg.description ]]</div>
+                <div><strong>Path:</strong> <code>[[ cfg.path ]]</code></div>
+                <a-textarea v-model="cfg.content" :rows="10"></a-textarea>
+                <a-space>
+                  <a-button type="primary" size="small" @click="saveConfig(cfg.key)">Save</a-button>
+                </a-space>
+              </a-space>
+            </a-card>
+          </a-col>
+        </a-row>
+      </a-spin>
+    </a-layout-content>
+  </a-layout>
+</a-layout>
+
+<script>
+  const app = new Vue({
+    el: '#app',
+    delimiters: ['[[', ']]'],
+    data() {
+      return {
+        loading: false,
+        services: [],
+        configs: [],
+        trustTunnel: {
+          listenHost: '0.0.0.0',
+          listenPort: 443,
+          credentialsFile: '/opt/trusttunnel/credentials.toml',
+          hostname: '',
+          certChainPath: '',
+          privateKeyPath: '',
+          publicAddress: '',
+        },
+        mtproto: {
+          bindHost: '0.0.0.0',
+          port: 2443,
+          secret: '',
+          configPath: '/opt/trusttunnel/access/mtproto.toml',
+        },
+        trustTunnelClients: [],
+        clientDraft: {
+          username: '',
+          password: '',
+        },
+        exportedLink: '',
+        clientColumns: [
+          { title: 'Username', dataIndex: 'username', key: 'username' },
+          { title: 'Password', dataIndex: 'password', key: 'password', scopedSlots: { customRender: 'password' } },
+          { title: 'Actions', key: 'actions', scopedSlots: { customRender: 'actions' } },
+        ],
+      }
+    },
+    methods: {
+      async load() {
+        this.loading = true;
+        const msg = await HttpUtil.get('/panel/api/services/status');
+        this.loading = false;
+        if (!msg.success) {
+          return;
+        }
+        this.services = msg.obj || [];
+      },
+      async loadTrustTunnel() {
+        const msg = await HttpUtil.get('/panel/api/services/trusttunnel');
+        if (!msg.success) {
+          return;
+        }
+        this.trustTunnel = Object.assign({}, this.trustTunnel, msg.obj || {});
+      },
+      async saveTrustTunnel() {
+        this.loading = true;
+        const msg = await HttpUtil.post('/panel/api/services/trusttunnel', this.trustTunnel);
+        this.loading = false;
+        if (!msg.success) {
+          return;
+        }
+        this.trustTunnel = Object.assign({}, this.trustTunnel, msg.obj || {});
+        await this.loadConfigs();
+      },
+      async loadMTProto() {
+        const msg = await HttpUtil.get('/panel/api/services/mtproto');
+        if (!msg.success) {
+          return;
+        }
+        this.mtproto = Object.assign({}, this.mtproto, msg.obj || {});
+      },
+      async saveMTProto() {
+        this.loading = true;
+        const msg = await HttpUtil.post('/panel/api/services/mtproto', this.mtproto);
+        this.loading = false;
+        if (!msg.success) {
+          return;
+        }
+        this.mtproto = Object.assign({}, this.mtproto, msg.obj || {});
+        await this.loadConfigs();
+      },
+      async loadTrustTunnelClients() {
+        const msg = await HttpUtil.get('/panel/api/services/trusttunnel/clients');
+        if (!msg.success) {
+          return;
+        }
+        this.trustTunnelClients = msg.obj || [];
+      },
+      async createTrustTunnelClient() {
+        this.loading = true;
+        const msg = await HttpUtil.post('/panel/api/services/trusttunnel/clients', this.clientDraft);
+        this.loading = false;
+        if (!msg.success) {
+          return;
+        }
+        this.clientDraft = { username: '', password: '' };
+        await this.loadTrustTunnelClients();
+      },
+      async deleteTrustTunnelClient(username) {
+        this.loading = true;
+        const msg = await HttpUtil.post(`/panel/api/services/trusttunnel/clients/${encodeURIComponent(username)}/delete`);
+        this.loading = false;
+        if (!msg.success) {
+          return;
+        }
+        if (this.exportedLink && this.exportedLink.includes(username)) {
+          this.exportedLink = '';
+        }
+        await this.loadTrustTunnelClients();
+      },
+      async exportTrustTunnelClient(username) {
+        this.loading = true;
+        const msg = await HttpUtil.get(`/panel/api/services/trusttunnel/clients/${encodeURIComponent(username)}/export`);
+        this.loading = false;
+        if (!msg.success) {
+          return;
+        }
+        this.exportedLink = (msg.obj && msg.obj.deeplink) || '';
+      },
+      async loadConfigs() {
+        const msg = await HttpUtil.get('/panel/api/services/configs');
+        if (!msg.success) {
+          return;
+        }
+        this.configs = (msg.obj || []).map(item => ({ ...item, content: '' }));
+        for (const item of this.configs) {
+          await this.loadConfig(item.key);
+        }
+      },
+      async loadConfig(key) {
+        const msg = await HttpUtil.get(`/panel/api/services/config/${key}`);
+        if (!msg.success) {
+          return;
+        }
+        const index = this.configs.findIndex(item => item.key === key);
+        if (index >= 0) {
+          this.$set(this.configs, index, msg.obj);
+        } else {
+          this.configs.push(msg.obj);
+        }
+      },
+      async saveConfig(key) {
+        const item = this.configs.find(cfg => cfg.key === key);
+        if (!item) {
+          return;
+        }
+        this.loading = true;
+        const msg = await HttpUtil.post(`/panel/api/services/config/${key}`, { content: item.content });
+        this.loading = false;
+        if (!msg.success) {
+          return;
+        }
+        await this.loadConfig(key);
+      },
+      async runAction(key, action) {
+        this.loading = true;
+        const msg = await HttpUtil.post(`/panel/api/services/${key}/${action}`);
+        this.loading = false;
+        if (!msg.success) {
+          return;
+        }
+        this.services = msg.obj || [];
+      },
+    },
+    async mounted() {
+      await this.load();
+      await this.loadTrustTunnel();
+      await this.loadTrustTunnelClients();
+      await this.loadMTProto();
+      await this.loadConfigs();
+    }
+  });
+</script>
+
+{{template "component/aSidebar" .}}
+{{ template "page/body_end" .}}

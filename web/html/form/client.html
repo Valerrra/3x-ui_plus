@@ -1,5 +1,13 @@
 {{define "form/client"}}
 <a-form layout="horizontal" v-if="client" :colon="false" :label-col="{ md: {span:8} }" :wrapper-col="{ md: {span:14} }">
+    <a-alert
+        v-if="inbound.protocol === Protocols.TRUSTTUNNEL"
+        type="info"
+        show-icon
+        :style="{ marginBottom: '16px' }"
+        message="TrustTunnel user"
+        description="Create a username and password for the existing TrustTunnel endpoint. Traffic and expiry can stay unlimited."
+    ></a-alert>
     <a-form-item label='{{ i18n "pages.inbounds.enable" }}'>
         <a-switch v-model="client.enable"></a-switch>
     </a-form-item>
@@ -9,13 +17,16 @@
                 <template slot="title">
                     <span>{{ i18n "pages.inbounds.emailDesc" }}</span>
                 </template>
-                {{ i18n "pages.inbounds.email" }}
+                [[ inbound.protocol === Protocols.TRUSTTUNNEL ? 'Username' : '{{ i18n "pages.inbounds.email" }}' ]]
                 <a-icon type="sync" @click="client.email = RandomUtil.randomLowerAndNum(9)"></a-icon>
             </a-tooltip>
         </template>
-        <a-input v-model.trim="client.email"></a-input>
+        <a-input
+            v-model.trim="client.email"
+            :placeholder="inbound.protocol === Protocols.TRUSTTUNNEL ? 'ttuser01' : ''"
+        ></a-input>
     </a-form-item>
-    <a-form-item v-if="inbound.protocol === Protocols.TROJAN || inbound.protocol === Protocols.SHADOWSOCKS">
+    <a-form-item v-if="inbound.protocol === Protocols.TROJAN || inbound.protocol === Protocols.SHADOWSOCKS || inbound.protocol === Protocols.TRUSTTUNNEL">
         <template slot="label">
             <a-tooltip>
                 <template slot="title">
@@ -24,9 +35,13 @@
                 {{ i18n "password" }}
                 <a-icon v-if="inbound.protocol === Protocols.SHADOWSOCKS" @click="client.password = RandomUtil.randomShadowsocksPassword(inbound.settings.method)" type="sync"></a-icon>
                 <a-icon v-if="inbound.protocol === Protocols.TROJAN" @click="client.password = RandomUtil.randomSeq(10)"type="sync"> </a-icon>
+                <a-icon v-if="inbound.protocol === Protocols.TRUSTTUNNEL" @click="client.password = RandomUtil.randomSeq(14)" type="sync"></a-icon>
             </a-tooltip>
         </template>
-        <a-input v-model.trim="client.password"></a-input>
+        <a-input
+            v-model.trim="client.password"
+            :placeholder="inbound.protocol === Protocols.TRUSTTUNNEL ? 'Use a strong password' : ''"
+        ></a-input>
     </a-form-item>
     <a-form-item v-if="inbound.protocol === Protocols.VMESS || inbound.protocol === Protocols.VLESS">
         <template slot="label">
@@ -44,7 +59,7 @@
             <a-select-option v-for="key in USERS_SECURITY" :value="key">[[ key ]]</a-select-option>
         </a-select>
     </a-form-item>
-    <a-form-item v-if="client.email && app.subSettings?.enable">
+    <a-form-item v-if="client.email && app.subSettings?.enable && inbound.protocol !== Protocols.TRUSTTUNNEL">
         <template slot="label">
             <a-tooltip>
                 <template slot="title">
@@ -56,7 +71,7 @@
         </template>
         <a-input v-model.trim="client.subId"></a-input>
     </a-form-item>
-    <a-form-item v-if="client.email && app.tgBotEnable">
+    <a-form-item v-if="client.email && app.tgBotEnable && inbound.protocol !== Protocols.TRUSTTUNNEL">
         <template slot="label">
             <a-tooltip>
                 <template slot="title">
@@ -69,9 +84,12 @@
         <a-input-number :style="{ width: '50%' }" v-model.number="client.tgId" min="0"></a-input-number>
     </a-form-item>
     <a-form-item v-if="client.email" label='{{ i18n "comment" }}'>
-        <a-input v-model.trim="client.comment"></a-input>
+        <a-input
+            v-model.trim="client.comment"
+            :placeholder="inbound.protocol === Protocols.TRUSTTUNNEL ? 'Optional note: device, owner, test user' : ''"
+        ></a-input>
     </a-form-item>
-    <a-form-item v-if="app.ipLimitEnable">
+    <a-form-item v-if="app.ipLimitEnable && inbound.protocol !== Protocols.TRUSTTUNNEL">
         <template slot="label">
             <a-tooltip>
                 <template slot="title">
@@ -83,7 +101,7 @@
         </template>
         <a-input-number v-model.number="client.limitIp" min="0"></a-input-number>
     </a-form-item>
-    <a-form-item v-if="app.ipLimitEnable && client.limitIp > 0 && client.email && isEdit">
+    <a-form-item v-if="app.ipLimitEnable && client.limitIp > 0 && client.email && isEdit && inbound.protocol !== Protocols.TRUSTTUNNEL">
         <template slot="label">
             <a-tooltip>
                 <template slot="title">

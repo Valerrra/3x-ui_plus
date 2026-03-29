@@ -26,6 +26,70 @@ type InboundService struct {
 	xrayApi xray.XrayAPI
 }
 
+func (s *InboundService) clientIDValue(protocol model.Protocol, client model.Client) string {
+	switch protocol {
+	case model.Trojan:
+		return client.Password
+	case model.Shadowsocks, model.TrustTunnel:
+		return client.Email
+	default:
+		return client.ID
+	}
+}
+
+func (s *InboundService) clientKey(protocol model.Protocol) string {
+	switch protocol {
+	case model.Trojan:
+		return "password"
+	case model.Shadowsocks, model.TrustTunnel:
+		return "email"
+	default:
+		return "id"
+	}
+}
+
+func (s *InboundService) isXrayProtocol(protocol model.Protocol) bool {
+	switch protocol {
+	case model.VMESS, model.VLESS, model.Trojan, model.Shadowsocks, model.Tunnel, model.HTTP, model.Mixed, model.WireGuard:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *InboundService) isManagedProtocol(protocol model.Protocol) bool {
+	switch protocol {
+	case model.TrustTunnel, model.MTProto:
+		return true
+	default:
+		return false
+	}
+}
+
+func (s *InboundService) applyManagedRuntime(inbound *model.Inbound) error {
+	transportService := ManagedTransportService{}
+	switch inbound.Protocol {
+	case model.TrustTunnel:
+		return transportService.ApplyTrustTunnelInbound(inbound)
+	case model.MTProto:
+		return transportService.ApplyMTProtoInbound(inbound)
+	default:
+		return nil
+	}
+}
+
+func (s *InboundService) disableManagedRuntime(protocol model.Protocol) error {
+	transportService := ManagedTransportService{}
+	switch protocol {
+	case model.TrustTunnel:
+		return transportService.DisableTrustTunnel()
+	case model.MTProto:
+		return transportService.DisableMTProto()
+	default:
+		return nil
+	}
+}
+
 // GetInbounds retrieves all inbounds for a specific user.
 // Returns a slice of inbound models with their associated client statistics.
 func (s *InboundService) GetInbounds(userId int) ([]*model.Inbound, error) {
@@ -261,19 +325,8 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 
 	// Secure client ID
 	for _, client := range clients {
-		switch inbound.Protocol {
-		case "trojan":
-			if client.Password == "" {
-				return inbound, false, common.NewError("empty client ID")
-			}
-		case "shadowsocks":
-			if client.Email == "" {
-				return inbound, false, common.NewError("empty client ID")
-			}
-		default:
-			if client.ID == "" {
-				return inbound, false, common.NewError("empty client ID")
-			}
+		if s.clientIDValue(inbound.Protocol, client) == "" {
+			return inbound, false, common.NewError("empty client ID")
 		}
 	}
 
@@ -287,7 +340,7 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		}
 	}()
 
-	err = tx.Save(inbound).Error
+	err = tx.Omit("ClientStats").Save(inbound).Error
 	if err == nil {
 		if len(inbound.ClientStats) == 0 {
 			for _, client := range clients {
@@ -299,7 +352,7 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 	}
 
 	needRestart := false
-	if inbound.Enable {
+	if inbound.Enable && s.isXrayProtocol(inbound.Protocol) {
 		s.xrayApi.Init(p.GetAPIPort())
 		inboundJson, err1 := json.MarshalIndent(inbound.GenXrayInboundConfig(), "", "  ")
 		if err1 != nil {
@@ -316,6 +369,12 @@ func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, boo
 		s.xrayApi.Close()
 	}
 
+	if inbound.Enable && s.isManagedProtocol(inbound.Protocol) {
+		if err := s.applyManagedRuntime(inbound); err != nil {
+			return inbound, false, err
+		}
+	}
+
 	return inbound, needRestart, err
 }
 
@@ -327,8 +386,12 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 
 	var tag string
 	needRestart := false
+	inbound, err := s.GetInbound(id)
+	if err != nil {
+		return false, err
+	}
 	result := db.Model(model.Inbound{}).Select("tag").Where("id = ? and enable = ?", id, true).First(&tag)
-	if result.Error == nil {
+	if result.Error == nil && s.isXrayProtocol(inbound.Protocol) {
 		s.xrayApi.Init(p.GetAPIPort())
 		err1 := s.xrayApi.DelInbound(tag)
 		if err1 == nil {
@@ -343,11 +406,7 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 	}
 
 	// Delete client traffics of inbounds
-	err := db.Where("inbound_id = ?", id).Delete(xray.ClientTraffic{}).Error
-	if err != nil {
-		return false, err
-	}
-	inbound, err := s.GetInbound(id)
+	err = db.Where("inbound_id = ?", id).Delete(xray.ClientTraffic{}).Error
 	if err != nil {
 		return false, err
 	}
@@ -362,7 +421,16 @@ func (s *InboundService) DelInbound(id int) (bool, error) {
 		}
 	}
 
-	return needRestart, db.Delete(model.Inbound{}, id).Error
+	err = db.Delete(model.Inbound{}, id).Error
+	if err != nil {
+		return needRestart, err
+	}
+	if inbound.Enable && s.isManagedProtocol(inbound.Protocol) {
+		if err := s.disableManagedRuntime(inbound.Protocol); err != nil {
+			return needRestart, err
+		}
+	}
+	return needRestart, nil
 }
 
 func (s *InboundService) GetInbound(id int) (*model.Inbound, error) {
@@ -375,10 +443,46 @@ func (s *InboundService) GetInbound(id int) (*model.Inbound, error) {
 	return inbound, nil
 }
 
+func (s *InboundService) ExportTrustTunnelClient(inboundID int, username string) (string, error) {
+	inbound, err := s.GetInbound(inboundID)
+	if err != nil {
+		return "", err
+	}
+	if inbound.Protocol != model.TrustTunnel {
+		return "", common.NewError("inbound is not TrustTunnel")
+	}
+	clients, err := s.GetClients(inbound)
+	if err != nil {
+		return "", err
+	}
+	found := false
+	for _, client := range clients {
+		if strings.EqualFold(client.Email, username) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return "", common.NewError("client not found:", username)
+	}
+	settings := struct {
+		UpstreamProtocol string `json:"upstreamProtocol"`
+		AntiDpi          bool   `json:"antiDpi"`
+	}{}
+	if strings.TrimSpace(inbound.Settings) != "" {
+		if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+			return "", fmt.Errorf("parse TrustTunnel inbound settings: %w", err)
+		}
+	}
+	transportService := ManagedTransportService{}
+	return transportService.ExportTrustTunnelClientWithOptions(username, settings.UpstreamProtocol, settings.AntiDpi)
+}
+
 // UpdateInbound modifies an existing inbound configuration.
 // It validates changes, updates the database, and syncs with the running Xray instance.
 // Returns the updated inbound, whether Xray needs restart, and any error.
 func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, bool, error) {
+	logger.Debug("UpdateInbound start:", inbound.Id, inbound.Protocol)
 	exist, err := s.checkPortExist(inbound.Listen, inbound.Port, inbound.Id)
 	if err != nil {
 		return inbound, false, err
@@ -396,8 +500,12 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 
 	db := database.GetDB()
 	tx := db.Begin()
+	finalized := false
 
 	defer func() {
+		if finalized {
+			return
+		}
 		if err != nil {
 			tx.Rollback()
 		} else {
@@ -409,6 +517,7 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	if err != nil {
 		return inbound, false, err
 	}
+	logger.Debug("UpdateInbound after updateClientTraffics:", inbound.Id)
 
 	// Ensure created_at and updated_at exist in inbound.Settings clients
 	{
@@ -489,28 +598,57 @@ func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, 
 	}
 
 	needRestart := false
-	s.xrayApi.Init(p.GetAPIPort())
-	if s.xrayApi.DelInbound(tag) == nil {
-		logger.Debug("Old inbound deleted by api:", tag)
-	}
-	if inbound.Enable {
-		inboundJson, err2 := json.MarshalIndent(oldInbound.GenXrayInboundConfig(), "", "  ")
-		if err2 != nil {
-			logger.Debug("Unable to marshal updated inbound config:", err2)
-			needRestart = true
-		} else {
-			err2 = s.xrayApi.AddInbound(inboundJson)
-			if err2 == nil {
-				logger.Debug("Updated inbound added by api:", oldInbound.Tag)
-			} else {
-				logger.Debug("Unable to update inbound by api:", err2)
+	if s.isXrayProtocol(inbound.Protocol) {
+		s.xrayApi.Init(p.GetAPIPort())
+		if s.xrayApi.DelInbound(tag) == nil {
+			logger.Debug("Old inbound deleted by api:", tag)
+		}
+		if inbound.Enable {
+			inboundJson, err2 := json.MarshalIndent(oldInbound.GenXrayInboundConfig(), "", "  ")
+			if err2 != nil {
+				logger.Debug("Unable to marshal updated inbound config:", err2)
 				needRestart = true
+			} else {
+				err2 = s.xrayApi.AddInbound(inboundJson)
+				if err2 == nil {
+					logger.Debug("Updated inbound added by api:", oldInbound.Tag)
+				} else {
+					logger.Debug("Unable to update inbound by api:", err2)
+					needRestart = true
+				}
 			}
 		}
+		s.xrayApi.Close()
 	}
-	s.xrayApi.Close()
 
-	return inbound, needRestart, tx.Save(oldInbound).Error
+	if s.isManagedProtocol(inbound.Protocol) {
+		logger.Debug("UpdateInbound managed save begin:", inbound.Id)
+		if err := tx.Omit("ClientStats").Save(oldInbound).Error; err != nil {
+			return inbound, needRestart, err
+		}
+		logger.Debug("UpdateInbound managed save done:", inbound.Id)
+		if err := tx.Commit().Error; err != nil {
+			return inbound, needRestart, err
+		}
+		logger.Debug("UpdateInbound managed commit done:", inbound.Id)
+		finalized = true
+		if inbound.Enable {
+			logger.Debug("UpdateInbound managed runtime apply begin:", inbound.Id)
+			if err := s.applyManagedRuntime(inbound); err != nil {
+				return inbound, needRestart, err
+			}
+			logger.Debug("UpdateInbound managed runtime apply done:", inbound.Id)
+		} else if oldInbound.Enable {
+			if err := s.disableManagedRuntime(inbound.Protocol); err != nil {
+				return inbound, needRestart, err
+			}
+		}
+		logger.Debug("UpdateInbound managed return:", inbound.Id)
+		return inbound, needRestart, nil
+	}
+
+	logger.Debug("UpdateInbound regular save begin:", inbound.Id)
+	return inbound, needRestart, tx.Omit("ClientStats").Save(oldInbound).Error
 }
 
 func (s *InboundService) updateClientTraffics(tx *gorm.DB, oldInbound *model.Inbound, newInbound *model.Inbound) error {
@@ -597,19 +735,8 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 
 	// Secure client ID
 	for _, client := range clients {
-		switch oldInbound.Protocol {
-		case "trojan":
-			if client.Password == "" {
-				return false, common.NewError("empty client ID")
-			}
-		case "shadowsocks":
-			if client.Email == "" {
-				return false, common.NewError("empty client ID")
-			}
-		default:
-			if client.ID == "" {
-				return false, common.NewError("empty client ID")
-			}
+		if s.clientIDValue(oldInbound.Protocol, client) == "" {
+			return false, common.NewError("empty client ID")
 		}
 	}
 
@@ -631,6 +758,17 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 
 	oldInbound.Settings = string(newSettings)
 
+	if s.isManagedProtocol(oldInbound.Protocol) {
+		db := database.GetDB()
+		if err := db.Save(oldInbound).Error; err != nil {
+			return false, err
+		}
+		if err := s.syncManagedClients(oldInbound); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
 	db := database.GetDB()
 	tx := db.Begin()
 
@@ -643,35 +781,48 @@ func (s *InboundService) AddInboundClient(data *model.Inbound) (bool, error) {
 	}()
 
 	needRestart := false
-	s.xrayApi.Init(p.GetAPIPort())
 	for _, client := range clients {
 		if len(client.Email) > 0 {
 			s.AddClientStat(tx, data.Id, &client)
-			if client.Enable {
-				cipher := ""
-				if oldInbound.Protocol == "shadowsocks" {
-					cipher = oldSettings["method"].(string)
-				}
-				err1 := s.xrayApi.AddUser(string(oldInbound.Protocol), oldInbound.Tag, map[string]any{
-					"email":    client.Email,
-					"id":       client.ID,
-					"security": client.Security,
-					"flow":     client.Flow,
-					"password": client.Password,
-					"cipher":   cipher,
-				})
-				if err1 == nil {
-					logger.Debug("Client added by api:", client.Email)
-				} else {
-					logger.Debug("Error in adding client by api:", err1)
-					needRestart = true
-				}
-			}
 		} else {
 			needRestart = true
 		}
 	}
-	s.xrayApi.Close()
+	if s.isXrayProtocol(oldInbound.Protocol) {
+		s.xrayApi.Init(p.GetAPIPort())
+		for _, client := range clients {
+			if len(client.Email) == 0 || !client.Enable {
+				continue
+			}
+			cipher := ""
+			if oldInbound.Protocol == "shadowsocks" {
+				cipher = oldSettings["method"].(string)
+			}
+			err1 := s.xrayApi.AddUser(string(oldInbound.Protocol), oldInbound.Tag, map[string]any{
+				"email":    client.Email,
+				"id":       client.ID,
+				"security": client.Security,
+				"flow":     client.Flow,
+				"password": client.Password,
+				"cipher":   cipher,
+			})
+			if err1 == nil {
+				logger.Debug("Client added by api:", client.Email)
+			} else {
+				logger.Debug("Error in adding client by api:", err1)
+				needRestart = true
+			}
+		}
+		s.xrayApi.Close()
+	} else if s.isManagedProtocol(oldInbound.Protocol) {
+		if err := tx.Save(oldInbound).Error; err != nil {
+			return false, err
+		}
+		if err := s.applyManagedRuntime(oldInbound); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
 
 	return needRestart, tx.Save(oldInbound).Error
 }
@@ -689,13 +840,7 @@ func (s *InboundService) DelInboundClient(inboundId int, clientId string) (bool,
 	}
 
 	email := ""
-	client_key := "id"
-	if oldInbound.Protocol == "trojan" {
-		client_key = "password"
-	}
-	if oldInbound.Protocol == "shadowsocks" {
-		client_key = "email"
-	}
+	client_key := s.clientKey(oldInbound.Protocol)
 
 	interfaceClients := settings["clients"].([]any)
 	var newClients []any
@@ -723,6 +868,17 @@ func (s *InboundService) DelInboundClient(inboundId int, clientId string) (bool,
 
 	oldInbound.Settings = string(newSettings)
 
+	if s.isManagedProtocol(oldInbound.Protocol) {
+		db := database.GetDB()
+		if err := db.Save(oldInbound).Error; err != nil {
+			return false, err
+		}
+		if err := s.syncManagedClients(oldInbound); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+
 	db := database.GetDB()
 
 	err = s.DelClientIPs(db, email)
@@ -744,7 +900,7 @@ func (s *InboundService) DelInboundClient(inboundId int, clientId string) (bool,
 			logger.Error("Delete stats Data Error")
 			return false, err
 		}
-		if needApiDel && notDepleted {
+		if needApiDel && notDepleted && s.isXrayProtocol(oldInbound.Protocol) {
 			s.xrayApi.Init(p.GetAPIPort())
 			err1 := s.xrayApi.RemoveUser(oldInbound.Tag, email)
 			if err1 == nil {
@@ -760,6 +916,15 @@ func (s *InboundService) DelInboundClient(inboundId int, clientId string) (bool,
 			}
 			s.xrayApi.Close()
 		}
+	}
+	if s.isManagedProtocol(oldInbound.Protocol) {
+		if err := db.Save(oldInbound).Error; err != nil {
+			return false, err
+		}
+		if err := s.applyManagedRuntime(oldInbound); err != nil {
+			return false, err
+		}
+		return false, nil
 	}
 	return needRestart, db.Save(oldInbound).Error
 }
@@ -793,18 +958,8 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 	newClientId := ""
 	clientIndex := -1
 	for index, oldClient := range oldClients {
-		oldClientId := ""
-		switch oldInbound.Protocol {
-		case "trojan":
-			oldClientId = oldClient.Password
-			newClientId = clients[0].Password
-		case "shadowsocks":
-			oldClientId = oldClient.Email
-			newClientId = clients[0].Email
-		default:
-			oldClientId = oldClient.ID
-			newClientId = clients[0].ID
-		}
+		oldClientId := s.clientIDValue(oldInbound.Protocol, oldClient)
+		newClientId = s.clientIDValue(oldInbound.Protocol, clients[0])
 		if clientId == oldClientId {
 			oldEmail = oldClient.Email
 			clientIndex = index
@@ -861,6 +1016,17 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 	}
 
 	oldInbound.Settings = string(newSettings)
+
+	if s.isManagedProtocol(oldInbound.Protocol) {
+		db := database.GetDB()
+		if err := db.Save(oldInbound).Error; err != nil {
+			return false, err
+		}
+		if err := s.syncManagedClients(oldInbound); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
 	db := database.GetDB()
 	tx := db.Begin()
 
@@ -897,41 +1063,51 @@ func (s *InboundService) UpdateInboundClient(data *model.Inbound, clientId strin
 	}
 	needRestart := false
 	if len(oldEmail) > 0 {
-		s.xrayApi.Init(p.GetAPIPort())
-		if oldClients[clientIndex].Enable {
-			err1 := s.xrayApi.RemoveUser(oldInbound.Tag, oldEmail)
-			if err1 == nil {
-				logger.Debug("Old client deleted by api:", oldEmail)
-			} else {
-				if strings.Contains(err1.Error(), fmt.Sprintf("User %s not found.", oldEmail)) {
-					logger.Debug("User is already deleted. Nothing to do more...")
+		if s.isXrayProtocol(oldInbound.Protocol) {
+			s.xrayApi.Init(p.GetAPIPort())
+			if oldClients[clientIndex].Enable {
+				err1 := s.xrayApi.RemoveUser(oldInbound.Tag, oldEmail)
+				if err1 == nil {
+					logger.Debug("Old client deleted by api:", oldEmail)
 				} else {
-					logger.Debug("Error in deleting client by api:", err1)
+					if strings.Contains(err1.Error(), fmt.Sprintf("User %s not found.", oldEmail)) {
+						logger.Debug("User is already deleted. Nothing to do more...")
+					} else {
+						logger.Debug("Error in deleting client by api:", err1)
+						needRestart = true
+					}
+				}
+			}
+			if clients[0].Enable {
+				cipher := ""
+				if oldInbound.Protocol == "shadowsocks" {
+					cipher = oldSettings["method"].(string)
+				}
+				err1 := s.xrayApi.AddUser(string(oldInbound.Protocol), oldInbound.Tag, map[string]any{
+					"email":    clients[0].Email,
+					"id":       clients[0].ID,
+					"security": clients[0].Security,
+					"flow":     clients[0].Flow,
+					"password": clients[0].Password,
+					"cipher":   cipher,
+				})
+				if err1 == nil {
+					logger.Debug("Client edited by api:", clients[0].Email)
+				} else {
+					logger.Debug("Error in adding client by api:", err1)
 					needRestart = true
 				}
 			}
-		}
-		if clients[0].Enable {
-			cipher := ""
-			if oldInbound.Protocol == "shadowsocks" {
-				cipher = oldSettings["method"].(string)
+			s.xrayApi.Close()
+		} else if s.isManagedProtocol(oldInbound.Protocol) {
+			if err := tx.Save(oldInbound).Error; err != nil {
+				return false, err
 			}
-			err1 := s.xrayApi.AddUser(string(oldInbound.Protocol), oldInbound.Tag, map[string]any{
-				"email":    clients[0].Email,
-				"id":       clients[0].ID,
-				"security": clients[0].Security,
-				"flow":     clients[0].Flow,
-				"password": clients[0].Password,
-				"cipher":   cipher,
-			})
-			if err1 == nil {
-				logger.Debug("Client edited by api:", clients[0].Email)
-			} else {
-				logger.Debug("Error in adding client by api:", err1)
-				needRestart = true
+			if err := s.applyManagedRuntime(oldInbound); err != nil {
+				return false, err
 			}
+			return false, nil
 		}
-		s.xrayApi.Close()
 	} else {
 		logger.Debug("Client old email not found")
 		needRestart = true
@@ -1337,6 +1513,35 @@ func (s *InboundService) AddClientStat(tx *gorm.DB, inboundId int, client *model
 	return err
 }
 
+func (s *InboundService) syncManagedClients(inbound *model.Inbound) error {
+	if inbound == nil {
+		return nil
+	}
+	if inbound.Protocol != model.TrustTunnel {
+		return s.applyManagedRuntime(inbound)
+	}
+
+	settings := struct {
+		CredentialsFile string `json:"credentialsFile"`
+	}{}
+	if strings.TrimSpace(inbound.Settings) != "" {
+		if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+			return fmt.Errorf("parse TrustTunnel inbound settings: %w", err)
+		}
+	}
+
+	clients, err := trustTunnelClientsFromInbound(inbound)
+	if err != nil {
+		return err
+	}
+	transportService := ManagedTransportService{}
+	return transportService.saveTrustTunnelClientsFromConfig(
+		defaultString(strings.TrimSpace(settings.CredentialsFile), "/opt/trusttunnel/credentials.toml"),
+		clients,
+		true,
+	)
+}
+
 func (s *InboundService) UpdateClientStat(tx *gorm.DB, email string, client *model.Client) error {
 	result := tx.Model(xray.ClientTraffic{}).
 		Where("email = ?", email).
@@ -1439,7 +1644,7 @@ func (s *InboundService) SetClientTelegramUserID(trafficId int, tgId int64) (boo
 			switch inbound.Protocol {
 			case "trojan":
 				clientId = oldClient.Password
-			case "shadowsocks":
+			case "shadowsocks", "trusttunnel":
 				clientId = oldClient.Email
 			default:
 				clientId = oldClient.ID
@@ -1525,7 +1730,7 @@ func (s *InboundService) ToggleClientEnableByEmail(clientEmail string) (bool, bo
 			switch inbound.Protocol {
 			case "trojan":
 				clientId = oldClient.Password
-			case "shadowsocks":
+			case "shadowsocks", "trusttunnel":
 				clientId = oldClient.Email
 			default:
 				clientId = oldClient.ID
@@ -1606,7 +1811,7 @@ func (s *InboundService) ResetClientIpLimitByEmail(clientEmail string, count int
 			switch inbound.Protocol {
 			case "trojan":
 				clientId = oldClient.Password
-			case "shadowsocks":
+			case "shadowsocks", "trusttunnel":
 				clientId = oldClient.Email
 			default:
 				clientId = oldClient.ID
@@ -1665,7 +1870,7 @@ func (s *InboundService) ResetClientExpiryTimeByEmail(clientEmail string, expiry
 			switch inbound.Protocol {
 			case "trojan":
 				clientId = oldClient.Password
-			case "shadowsocks":
+			case "shadowsocks", "trusttunnel":
 				clientId = oldClient.Email
 			default:
 				clientId = oldClient.ID
@@ -1727,7 +1932,7 @@ func (s *InboundService) ResetClientTrafficLimitByEmail(clientEmail string, tota
 			switch inbound.Protocol {
 			case "trojan":
 				clientId = oldClient.Password
-			case "shadowsocks":
+			case "shadowsocks", "trusttunnel":
 				clientId = oldClient.Email
 			default:
 				clientId = oldClient.ID
@@ -2108,7 +2313,7 @@ func (s *InboundService) SearchClientTraffic(query string) (traffic *xray.Client
 
 	clients := settings["clients"]
 	for _, client := range clients {
-		if (client.ID == query || client.Password == query) && client.Email != "" {
+		if (client.ID == query || client.Password == query || client.Email == query) && client.Email != "" {
 			traffic.Email = client.Email
 			break
 		}

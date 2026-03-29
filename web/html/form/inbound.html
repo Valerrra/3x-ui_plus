@@ -152,6 +152,64 @@
     {{template "form/tun"}}
 </template>
 
+<!-- trusttunnel -->
+<template v-if="inbound.protocol === Protocols.TRUSTTUNNEL">
+    <a-form :colon="false" :label-col="{ md: {span:8} }"
+        :wrapper-col="{ md: {span:14} }">
+        <a-alert
+            type="info"
+            show-icon
+            message="TrustTunnel создаёт пользователей на общем endpoint, логин и пароль задаются на уровне Clients."
+            style="margin-bottom: 12px;">
+        </a-alert>
+        <a-form-item label='Hostname'>
+            <a-input-group compact>
+                <a-input style="width: calc(100% - 120px)" v-model.trim="inbound.settings.hostname" placeholder="vpn.example.com"></a-input>
+                <a-button style="width: 120px" @click="fillTrustTunnelDefaults(true)">Авто</a-button>
+            </a-input-group>
+        </a-form-item>
+        <a-form-item label='Public Address'>
+            <a-input v-model.trim="inbound.settings.publicAddress"
+                placeholder="Обычно совпадает с Hostname"></a-input>
+        </a-form-item>
+        <a-form-item label='Client Protocol'>
+            <a-select v-model="inbound.settings.upstreamProtocol"
+                :dropdown-class-name="themeSwitcher.currentTheme">
+                <a-select-option value="http2">HTTP2</a-select-option>
+                <a-select-option value="http3">HTTP3</a-select-option>
+            </a-select>
+        </a-form-item>
+        <a-form-item label='AntiDPI'>
+            <a-switch v-model="inbound.settings.antiDpi"></a-switch>
+        </a-form-item>
+        <a-form-item label='Certificate'>
+            <a-input-group compact>
+                <a-input style="width: calc(100% - 140px)" v-model.trim="inbound.settings.certChainPath" placeholder="/etc/letsencrypt/live/.../fullchain.pem"></a-input>
+                <a-button style="width: 140px" @click="detectTrustTunnelCertificatePaths">Подтянуть</a-button>
+            </a-input-group>
+        </a-form-item>
+        <a-form-item label='Private Key'>
+            <a-input v-model.trim="inbound.settings.privateKeyPath" placeholder="/etc/letsencrypt/live/.../privkey.pem"></a-input>
+        </a-form-item>
+    </a-form>
+</template>
+
+<!-- mtproto -->
+<template v-if="inbound.protocol === Protocols.MTPROTO">
+    <a-form :colon="false" :label-col="{ md: {span:8} }"
+        :wrapper-col="{ md: {span:14} }">
+        <a-form-item label='Secret'>
+            <a-input v-model.trim="inbound.settings.secret"></a-input>
+        </a-form-item>
+        <a-form-item label='Fronting Domain'>
+            <a-input v-model.trim="inbound.settings.frontingDomain"></a-input>
+        </a-form-item>
+        <a-form-item label='Config Path'>
+            <a-input v-model.trim="inbound.settings.configPath"></a-input>
+        </a-form-item>
+    </a-form>
+</template>
+
 <!-- stream settings -->
 <template v-if="inbound.canEnableStream()">
     {{template "form/streamSettings"}}

@@ -135,6 +135,25 @@
       }
       this.visible = true;
     },
+    showTrustTunnel: function (title = '', dbInbound, client, link = '') {
+      this.title = title;
+      this.dbInbound = dbInbound;
+      this.inbound = dbInbound.toInbound();
+      this.client = client;
+      this.subId = '';
+      this.qrcodes = [];
+      if (qrModalApp) qrModalApp.statusFetched = false;
+      if (link) {
+        this.qrcodes.push({
+          remark: client && client.email ? client.email : 'TrustTunnel',
+          link: link,
+          useIPv4: false,
+          originalLink: link,
+          raw: true
+        });
+      }
+      this.visible = true;
+    },
     close: function () {
       this.visible = false;
     },
@@ -167,6 +186,10 @@
       },
       updateLink(index) {
         const row = qrModal.qrcodes[index];
+        if (row.raw) {
+          this.setQrCode("qrCode-" + index, row.link);
+          return;
+        }
         if (!this.serverStatus || !this.serverStatus.publicIP) {
           return;
         }

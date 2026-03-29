@@ -24,6 +24,8 @@ main
 # Ignore script and executable files
 /release.sh
 /x-ui
+/3x-ui
+/3x-ui-plus
 
 # Ignore OS specific files
 .DS_Store

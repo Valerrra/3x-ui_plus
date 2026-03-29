@@ -8,6 +8,8 @@ const Protocols = {
     HTTP: 'http',
     WIREGUARD: 'wireguard',
     TUN: 'tun',
+    TRUSTTUNNEL: 'trusttunnel',
+    MTPROTO: 'mtproto',
 };
 
 const SSMethods = {
@@ -1201,6 +1203,7 @@ class Inbound extends XrayCommonClass {
             case Protocols.VLESS: return this.settings.vlesses;
             case Protocols.TROJAN: return this.settings.trojans;
             case Protocols.SHADOWSOCKS: return this.isSSMultiUser ? this.settings.shadowsockses : null;
+            case Protocols.TRUSTTUNNEL: return this.settings.clients;
             default: return null;
         }
     }
@@ -1827,6 +1830,8 @@ Inbound.Settings = class extends XrayCommonClass {
             case Protocols.HTTP: return new Inbound.HttpSettings(protocol);
             case Protocols.WIREGUARD: return new Inbound.WireguardSettings(protocol);
             case Protocols.TUN: return new Inbound.TunSettings(protocol);
+            case Protocols.TRUSTTUNNEL: return new Inbound.TrustTunnelSettings(protocol);
+            case Protocols.MTPROTO: return new Inbound.MTProtoSettings(protocol);
             default: return null;
         }
     }
@@ -1842,6 +1847,8 @@ Inbound.Settings = class extends XrayCommonClass {
             case Protocols.HTTP: return Inbound.HttpSettings.fromJson(json);
             case Protocols.WIREGUARD: return Inbound.WireguardSettings.fromJson(json);
             case Protocols.TUN: return Inbound.TunSettings.fromJson(json);
+            case Protocols.TRUSTTUNNEL: return Inbound.TrustTunnelSettings.fromJson(json);
+            case Protocols.MTPROTO: return Inbound.MTProtoSettings.fromJson(json);
             default: return null;
         }
     }
@@ -2705,6 +2712,150 @@ Inbound.TunSettings = class extends Inbound.Settings {
             name: this.name || 'xray0',
             mtu: this.mtu || 1500,
             userLevel: this.userLevel || 0,
+        };
+    }
+};
+
+Inbound.TrustTunnelSettings = class extends Inbound.Settings {
+    constructor(
+        protocol,
+        hostname = '',
+        publicAddress = '',
+        credentialsFile = '/opt/trusttunnel/credentials.toml',
+        certChainPath = '',
+        privateKeyPath = '',
+        upstreamProtocol = 'http2',
+        antiDpi = false,
+        clients = [new Inbound.TrustTunnelSettings.Client()],
+    ) {
+        super(protocol);
+        this.hostname = hostname;
+        this.publicAddress = publicAddress;
+        this.credentialsFile = credentialsFile;
+        this.certChainPath = certChainPath;
+        this.privateKeyPath = privateKeyPath;
+        this.upstreamProtocol = upstreamProtocol;
+        this.antiDpi = antiDpi;
+        this.clients = clients;
+    }
+
+    static fromJson(json = {}) {
+        return new Inbound.TrustTunnelSettings(
+            Protocols.TRUSTTUNNEL,
+            json.hostname ?? '',
+            json.publicAddress ?? '',
+            json.credentialsFile ?? '/opt/trusttunnel/credentials.toml',
+            json.certChainPath ?? '',
+            json.privateKeyPath ?? '',
+            json.upstreamProtocol ?? 'http2',
+            json.antiDpi ?? false,
+            (json.clients || []).map(client => Inbound.TrustTunnelSettings.Client.fromJson(client)),
+        );
+    }
+
+    toJson() {
+        return {
+            hostname: this.hostname,
+            publicAddress: this.publicAddress,
+            credentialsFile: this.credentialsFile,
+            certChainPath: this.certChainPath,
+            privateKeyPath: this.privateKeyPath,
+            upstreamProtocol: this.upstreamProtocol,
+            antiDpi: this.antiDpi,
+            clients: Inbound.TrustTunnelSettings.toJsonArray(this.clients),
+        };
+    }
+};
+
+Inbound.TrustTunnelSettings.Client = class extends XrayCommonClass {
+    constructor(
+        email = RandomUtil.randomLowerAndNum(8),
+        password = RandomUtil.randomSeq(14),
+        totalGB = 0,
+        expiryTime = 0,
+        enable = true,
+        comment = '',
+        created_at = undefined,
+        updated_at = undefined,
+    ) {
+        super();
+        this.email = email;
+        this.password = password;
+        this.totalGB = totalGB;
+        this.expiryTime = expiryTime;
+        this.enable = enable;
+        this.comment = comment;
+        this.created_at = created_at;
+        this.updated_at = updated_at;
+    }
+
+    static fromJson(json = {}) {
+        return new Inbound.TrustTunnelSettings.Client(
+            json.email ?? '',
+            json.password ?? '',
+            json.totalGB ?? 0,
+            json.expiryTime ?? 0,
+            json.enable ?? true,
+            json.comment ?? '',
+            json.created_at,
+            json.updated_at,
+        );
+    }
+
+    get _expiryTime() {
+        if (this.expiryTime === 0 || this.expiryTime === "") {
+            return null;
+        }
+        if (this.expiryTime < 0) {
+            return this.expiryTime / -86400000;
+        }
+        return moment(this.expiryTime);
+    }
+
+    set _expiryTime(t) {
+        if (t == null || t === "") {
+            this.expiryTime = 0;
+        } else {
+            this.expiryTime = t.valueOf();
+        }
+    }
+
+    get _totalGB() {
+        return NumberFormatter.toFixed(this.totalGB / SizeFormatter.ONE_GB, 2);
+    }
+
+    set _totalGB(gb) {
+        this.totalGB = NumberFormatter.toFixed(gb * SizeFormatter.ONE_GB, 0);
+    }
+};
+
+Inbound.MTProtoSettings = class extends Inbound.Settings {
+    constructor(
+        protocol,
+        secret = '',
+        configPath = '/opt/trusttunnel/access/mtproto.toml',
+        frontingDomain = 'www.cloudflare.com',
+    ) {
+        super(protocol);
+        this.secret = secret;
+        this.configPath = configPath;
+        this.frontingDomain = frontingDomain;
+    }
+
+    static fromJson(json = {}) {
+        return new Inbound.MTProtoSettings(
+            Protocols.MTPROTO,
+            json.secret ?? '',
+            json.configPath ?? '/opt/trusttunnel/access/mtproto.toml',
+            json.frontingDomain ?? 'www.cloudflare.com',
+        );
+    }
+
+    toJson() {
+        return {
+            secret: this.secret,
+            configPath: this.configPath,
+            frontingDomain: this.frontingDomain,
         };
     }
 };

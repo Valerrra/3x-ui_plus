@@ -3,6 +3,7 @@
 package database
 
 import (
+	"database/sql"
 	"bytes"
 	"errors"
 	"io"
@@ -138,8 +139,12 @@ func InitDB(dbPath string) error {
 	c := &gorm.Config{
 		Logger: gormLogger,
 	}
-	db, err = gorm.Open(sqlite.Open(dbPath), c)
+	dsn := dbPath + "?_busy_timeout=10000&_journal_mode=WAL&_synchronous=NORMAL&_foreign_keys=on"
+	db, err = gorm.Open(sqlite.Open(dsn), c)
 	if err != nil {
+		return err
+	}
+	if err := configureSQLite(db); err != nil {
 		return err
 	}
 
@@ -156,6 +161,31 @@ func InitDB(dbPath string) error {
 		return err
 	}
 	return runSeeders(isUsersEmpty)
+}
+
+func configureSQLite(gdb *gorm.DB) error {
+	sqlDB, err := gdb.DB()
+	if err != nil {
+		return err
+	}
+	configureSQLPool(sqlDB)
+	pragmas := []string{
+		"PRAGMA busy_timeout = 10000;",
+		"PRAGMA journal_mode = WAL;",
+		"PRAGMA synchronous = NORMAL;",
+		"PRAGMA foreign_keys = ON;",
+	}
+	for _, pragma := range pragmas {
+		if err := gdb.Exec(pragma).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func configureSQLPool(sqlDB *sql.DB) {
+	sqlDB.SetMaxOpenConns(1)
+	sqlDB.SetMaxIdleConns(1)
 }
 
 // CloseDB closes the database connection if it exists.

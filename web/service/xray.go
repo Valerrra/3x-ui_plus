@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"sync"
 
+	"github.com/mhsanaei/3x-ui/v2/database/model"
 	"github.com/mhsanaei/3x-ui/v2/logger"
 	"github.com/mhsanaei/3x-ui/v2/xray"
 
@@ -111,6 +112,9 @@ func (s *XrayService) GetXrayConfig() (*xray.Config, error) {
 	}
 	for _, inbound := range inbounds {
 		if !inbound.Enable {
+			continue
+		}
+		if inbound.Protocol == model.TrustTunnel || inbound.Protocol == model.MTProto {
 			continue
 		}
 		// get settings clients

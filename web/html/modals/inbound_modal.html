@@ -131,6 +131,11 @@
             }
         },
         watch: {
+            'inModal.inbound.protocol'(newVal) {
+                if (newVal === Protocols.TRUSTTUNNEL) {
+                    this.fillTrustTunnelDefaults(false);
+                }
+            },
             'inModal.inbound.stream.security'(newVal, oldVal) {
                 // Clear flow when security changes from reality/tls to none
                 if (inModal.inbound.protocol == Protocols.VLESS && !inModal.inbound.canEnableTlsFlow()) {
@@ -153,6 +158,60 @@
             }
         },
         methods: {
+            async fillTrustTunnelDefaults(force = false) {
+                if (!this.inbound || this.inbound.protocol !== Protocols.TRUSTTUNNEL) {
+                    return;
+                }
+                const settings = this.inbound.settings;
+                if (!settings.upstreamProtocol) {
+                    this.$set(settings, 'upstreamProtocol', 'http2');
+                }
+                if (typeof settings.antiDpi !== 'boolean') {
+                    this.$set(settings, 'antiDpi', false);
+                }
+
+                const msg = await HttpUtil.get('/panel/api/services/trusttunnel');
+                if (msg.success && msg.obj) {
+                    if (force || !settings.hostname) {
+                        this.$set(settings, 'hostname', msg.obj.hostname || '');
+                    }
+                    if (force || !settings.publicAddress) {
+                        this.$set(settings, 'publicAddress', msg.obj.publicAddress || msg.obj.hostname || '');
+                    }
+                    if (force || !settings.certChainPath) {
+                        this.$set(settings, 'certChainPath', msg.obj.certChainPath || '');
+                    }
+                    if (force || !settings.privateKeyPath) {
+                        this.$set(settings, 'privateKeyPath', msg.obj.privateKeyPath || '');
+                    }
+                }
+
+                if (!settings.hostname && window.location.hostname && !/^\d+\.\d+\.\d+\.\d+$/.test(window.location.hostname)) {
+                    this.$set(settings, 'hostname', window.location.hostname);
+                }
+                if (!settings.publicAddress && settings.hostname) {
+                    this.$set(settings, 'publicAddress', settings.hostname);
+                }
+            },
+            async detectTrustTunnelCertificatePaths() {
+                if (!this.inbound || this.inbound.protocol !== Protocols.TRUSTTUNNEL) {
+                    return;
+                }
+                inModal.loading(true);
+                const settings = this.inbound.settings;
+                const hostname = settings.hostname || settings.publicAddress || '';
+                const msg = await HttpUtil.get('/panel/api/services/trusttunnel/cert-paths', { hostname });
+                inModal.loading(false);
+                if (!msg.success || !msg.obj) {
+                    return;
+                }
+                if (msg.obj.certChainPath) {
+                    this.$set(settings, 'certChainPath', msg.obj.certChainPath);
+                }
+                if (msg.obj.privateKeyPath) {
+                    this.$set(settings, 'privateKeyPath', msg.obj.privateKeyPath);
+                }
+            },
             streamNetworkChange() {
                 if (!inModal.inbound.canEnableTls()) {
                     this.inModal.inbound.stream.security = 'none';
@@ -291,6 +350,11 @@
             resetTestseed() {
                 // Reset testseed to default values using Vue.set for reactivity
                 this.$set(this.inbound.settings, 'testseed', [900, 500, 900, 256]);
+            }
+        },
+        mounted() {
+            if (this.inbound && this.inbound.protocol === Protocols.TRUSTTUNNEL) {
+                this.fillTrustTunnelDefaults(false);
             }
         },
     });

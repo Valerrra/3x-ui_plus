@@ -22,6 +22,24 @@
 
 As an enhanced fork of the original X-UI project, 3X-UI provides improved stability, broader protocol support, and additional features.
 
+## Fork-specific additions in this repository
+
+This fork also includes an experimental management layer for the TrustTunnel ecosystem:
+
+- `TrustTunnel` as a custom managed protocol inside `Inbounds`
+- `MTProto` as a custom managed protocol inside `Inbounds`
+- `TrustTunnel` client creation directly from the panel
+- `tt://` export for `TrustTunnel` users
+- QR-ready export flow for `TrustTunnel` links
+- automatic MTProto secret generation when the field is left empty
+
+These additions are designed for deployments that use:
+
+- [TrustTunnel](https://github.com/TrustTunnel/TrustTunnel) for endpoint/runtime
+- [trusty](https://github.com/Meddelin/trusty) and related client-side tooling for GUI onboarding
+
+At the moment, these fork-specific integrations should be treated as custom extensions of this repository rather than upstream 3X-UI features.
+
 ## Quick Start
 
 ```bash

@@ -43,8 +43,16 @@ At the moment, these fork-specific integrations should be treated as custom exte
 ## Quick Start
 
 ```bash
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
+bash <(curl -Ls https://raw.githubusercontent.com/Valerrra/3x-ui_plus/main/install.sh)
 ```
+
+After installation:
+
+1. Open the panel and sign in with the generated credentials.
+2. Create a new inbound and choose `TrustTunnel` or `MTProto` from the protocol list.
+3. For `TrustTunnel`, use the auto-fill helpers for hostname, public address, and certificate paths.
+4. Add `TrustTunnel` users from the inbound menu and export `tt://` links or QR codes directly from the panel.
+5. For `MTProto`, leave the secret empty to auto-generate a valid value on save.
 
 For full documentation, please visit the [project Wiki](https://github.com/MHSanaei/3x-ui/wiki).
 

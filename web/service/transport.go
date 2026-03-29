@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -49,10 +50,10 @@ type TrustTunnelServiceConfig struct {
 }
 
 type MTProtoServiceConfig struct {
-	BindHost   string `json:"bindHost"`
-	Port       int    `json:"port"`
-	Secret     string `json:"secret"`
-	ConfigPath string `json:"configPath"`
+	BindHost       string `json:"bindHost"`
+	Port           int    `json:"port"`
+	Secret         string `json:"secret"`
+	ConfigPath     string `json:"configPath"`
 	FrontingDomain string `json:"frontingDomain"`
 }
 
@@ -313,7 +314,12 @@ func (s *ManagedTransportService) SaveMTProtoConfig(cfg *MTProtoServiceConfig) e
 	}
 	secret := strings.TrimSpace(cfg.Secret)
 	if secret == "" {
-		return fmt.Errorf("MTProto secret is required")
+		generatedSecret, err := s.GenerateMTProtoSecret(cfg.FrontingDomain)
+		if err != nil {
+			return err
+		}
+		secret = generatedSecret
+		cfg.Secret = secret
 	}
 	configPath := strings.TrimSpace(cfg.ConfigPath)
 	if configPath == "" {
@@ -333,6 +339,34 @@ func (s *ManagedTransportService) SaveMTProtoConfig(cfg *MTProtoServiceConfig) e
 		return fmt.Errorf("encode mtproto config: %w", err)
 	}
 	return os.WriteFile(configPath, body, 0o600)
+}
+
+func (s *ManagedTransportService) GenerateMTProtoSecret(frontingDomain string) (string, error) {
+	domain := strings.TrimSpace(frontingDomain)
+	if domain == "" {
+		domain = "www.cloudflare.com"
+	}
+
+	mtgPath := "/usr/local/bin/mtg"
+	if _, err := os.Stat(mtgPath); err == nil {
+		cmd := exec.Command(mtgPath, "generate-secret", domain)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		if err := cmd.Run(); err == nil {
+			secret := strings.TrimSpace(stdout.String())
+			if secret != "" {
+				return secret, nil
+			}
+		}
+	}
+
+	randomPart := make([]byte, 16)
+	if _, err := rand.Read(randomPart); err != nil {
+		return "", fmt.Errorf("generate MTProto secret: %w", err)
+	}
+
+	return "ee" + hex.EncodeToString(randomPart) + hex.EncodeToString([]byte(domain)), nil
 }
 
 func (s *ManagedTransportService) ApplyTrustTunnelInbound(inbound *model.Inbound) error {
@@ -498,21 +532,25 @@ func (s *ManagedTransportService) ApplyMTProtoInbound(inbound *model.Inbound) er
 		}
 	}
 
-	if strings.TrimSpace(settings.Secret) == "" {
-		return fmt.Errorf("MTProto secret is required")
-	}
 	cfgPath := strings.TrimSpace(settings.ConfigPath)
 	if cfgPath == "" {
 		cfgPath = "/opt/trusttunnel/access/mtproto.toml"
 	}
-	if err := s.SaveMTProtoConfig(&MTProtoServiceConfig{
+	cfg := &MTProtoServiceConfig{
 		BindHost:      defaultString(strings.TrimSpace(inbound.Listen), "0.0.0.0"),
 		Port:          inbound.Port,
 		Secret:        settings.Secret,
 		ConfigPath:    cfgPath,
 		FrontingDomain: defaultString(strings.TrimSpace(settings.FrontingDomain), "www.cloudflare.com"),
-	}); err != nil {
+	}
+	if err := s.SaveMTProtoConfig(cfg); err != nil {
 		return err
+	}
+
+	settings.Secret = cfg.Secret
+	updatedSettings, err := json.Marshal(settings)
+	if err == nil {
+		inbound.Settings = string(updatedSettings)
 	}
 
 	if _, err := os.Stat("/usr/local/bin/mtg"); err == nil {

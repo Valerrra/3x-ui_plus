@@ -199,7 +199,7 @@
     <a-form :colon="false" :label-col="{ md: {span:8} }"
         :wrapper-col="{ md: {span:14} }">
         <a-form-item label='Secret'>
-            <a-input v-model.trim="inbound.settings.secret"></a-input>
+            <a-input v-model.trim="inbound.settings.secret" placeholder="Leave empty for auto-generated secret"></a-input>
         </a-form-item>
         <a-form-item label='Fronting Domain'>
             <a-input v-model.trim="inbound.settings.frontingDomain"></a-input>

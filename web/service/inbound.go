@@ -78,6 +78,47 @@ func (s *InboundService) applyManagedRuntime(inbound *model.Inbound) error {
 	}
 }
 
+func (s *InboundService) normalizeManagedInbound(inbound *model.Inbound) error {
+	if inbound == nil {
+		return nil
+	}
+
+	switch inbound.Protocol {
+	case model.MTProto:
+		settings := struct {
+			Secret         string `json:"secret"`
+			ConfigPath     string `json:"configPath"`
+			FrontingDomain string `json:"frontingDomain"`
+		}{}
+		if strings.TrimSpace(inbound.Settings) != "" {
+			if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+				return fmt.Errorf("parse MTProto inbound settings: %w", err)
+			}
+		}
+		if strings.TrimSpace(settings.FrontingDomain) == "" {
+			settings.FrontingDomain = "www.cloudflare.com"
+		}
+		if strings.TrimSpace(settings.ConfigPath) == "" {
+			settings.ConfigPath = "/opt/trusttunnel/access/mtproto.toml"
+		}
+		if strings.TrimSpace(settings.Secret) == "" {
+			transportService := ManagedTransportService{}
+			secret, err := transportService.GenerateMTProtoSecret(settings.FrontingDomain)
+			if err != nil {
+				return err
+			}
+			settings.Secret = secret
+		}
+		body, err := json.MarshalIndent(settings, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode MTProto inbound settings: %w", err)
+		}
+		inbound.Settings = string(body)
+	}
+
+	return nil
+}
+
 func (s *InboundService) disableManagedRuntime(protocol model.Protocol) error {
 	transportService := ManagedTransportService{}
 	switch protocol {
@@ -278,6 +319,10 @@ func (s *InboundService) checkEmailExistForInbound(inbound *model.Inbound) (stri
 // then saves the inbound to the database and optionally adds it to the running Xray instance.
 // Returns the created inbound, whether Xray needs restart, and any error.
 func (s *InboundService) AddInbound(inbound *model.Inbound) (*model.Inbound, bool, error) {
+	if err := s.normalizeManagedInbound(inbound); err != nil {
+		return inbound, false, err
+	}
+
 	exist, err := s.checkPortExist(inbound.Listen, inbound.Port, 0)
 	if err != nil {
 		return inbound, false, err
@@ -483,6 +528,9 @@ func (s *InboundService) ExportTrustTunnelClient(inboundID int, username string)
 // Returns the updated inbound, whether Xray needs restart, and any error.
 func (s *InboundService) UpdateInbound(inbound *model.Inbound) (*model.Inbound, bool, error) {
 	logger.Debug("UpdateInbound start:", inbound.Id, inbound.Protocol)
+	if err := s.normalizeManagedInbound(inbound); err != nil {
+		return inbound, false, err
+	}
 	exist, err := s.checkPortExist(inbound.Listen, inbound.Port, inbound.Id)
 	if err != nil {
 		return inbound, false, err

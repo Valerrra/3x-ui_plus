@@ -210,6 +210,28 @@
     </a-form>
 </template>
 
+<!-- socks5 -->
+<template v-if="inbound.protocol === Protocols.SOCKS5">
+    <a-form :colon="false" :label-col="{ md: {span:8} }"
+        :wrapper-col="{ md: {span:14} }">
+        <a-alert
+            type="info"
+            show-icon
+            message="SOCKS5 доступ можно оставить без авторизации, или задать логин и пароль."
+            style="margin-bottom: 12px;">
+        </a-alert>
+        <a-form-item label='Username'>
+            <a-input v-model.trim="inbound.settings.username" placeholder="Optional"></a-input>
+        </a-form-item>
+        <a-form-item label='Password'>
+            <a-input v-model.trim="inbound.settings.password" placeholder="Optional"></a-input>
+        </a-form-item>
+        <a-form-item label='State Path'>
+            <a-input v-model.trim="inbound.settings.statePath"></a-input>
+        </a-form-item>
+    </a-form>
+</template>
+
 <!-- stream settings -->
 <template v-if="inbound.canEnableStream()">
     {{template "form/streamSettings"}}

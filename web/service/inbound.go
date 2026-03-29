@@ -59,7 +59,7 @@ func (s *InboundService) isXrayProtocol(protocol model.Protocol) bool {
 
 func (s *InboundService) isManagedProtocol(protocol model.Protocol) bool {
 	switch protocol {
-	case model.TrustTunnel, model.MTProto:
+	case model.TrustTunnel, model.MTProto, model.Socks5:
 		return true
 	default:
 		return false
@@ -73,6 +73,8 @@ func (s *InboundService) applyManagedRuntime(inbound *model.Inbound) error {
 		return transportService.ApplyTrustTunnelInbound(inbound)
 	case model.MTProto:
 		return transportService.ApplyMTProtoInbound(inbound)
+	case model.Socks5:
+		return transportService.ApplySocks5Inbound(inbound)
 	default:
 		return nil
 	}
@@ -114,6 +116,25 @@ func (s *InboundService) normalizeManagedInbound(inbound *model.Inbound) error {
 			return fmt.Errorf("encode MTProto inbound settings: %w", err)
 		}
 		inbound.Settings = string(body)
+	case model.Socks5:
+		settings := struct {
+			Username  string `json:"username"`
+			Password  string `json:"password"`
+			StatePath string `json:"statePath"`
+		}{}
+		if strings.TrimSpace(inbound.Settings) != "" {
+			if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+				return fmt.Errorf("parse SOCKS5 inbound settings: %w", err)
+			}
+		}
+		if strings.TrimSpace(settings.StatePath) == "" {
+			settings.StatePath = "/opt/trusttunnel/socks5-state.json"
+		}
+		body, err := json.MarshalIndent(settings, "", "  ")
+		if err != nil {
+			return fmt.Errorf("encode SOCKS5 inbound settings: %w", err)
+		}
+		inbound.Settings = string(body)
 	}
 
 	return nil
@@ -126,6 +147,8 @@ func (s *InboundService) disableManagedRuntime(protocol model.Protocol) error {
 		return transportService.DisableTrustTunnel()
 	case model.MTProto:
 		return transportService.DisableMTProto()
+	case model.Socks5:
+		return transportService.DisableSocks5()
 	default:
 		return nil
 	}

@@ -57,6 +57,12 @@ type MTProtoServiceConfig struct {
 	FrontingDomain string `json:"frontingDomain"`
 }
 
+type Socks5ServiceConfig struct {
+	Username  string `json:"username"`
+	Password  string `json:"password"`
+	StatePath string `json:"statePath"`
+}
+
 type TrustTunnelClient struct {
 	Username string `json:"username" toml:"username"`
 	Password string `json:"password" toml:"password"`
@@ -123,6 +129,7 @@ func (s *ManagedTransportService) RunAction(key, action string) error {
 		"trusttunnel":         "trusttunnel",
 		"trusttunnel-webui":   "trusttunnel-webui",
 		"trusttunnel-mtproto": "trusttunnel-mtproto",
+		"trusttunnel-socks5":  "trusttunnel-socks5",
 	}[key]
 	if !ok {
 		return fmt.Errorf("unknown service key: %s", key)
@@ -790,6 +797,102 @@ func (s *ManagedTransportService) ApplyMTProtoInbound(inbound *model.Inbound) er
 	}
 
 	return nil
+}
+
+func (s *ManagedTransportService) ApplySocks5Inbound(inbound *model.Inbound) error {
+	if inbound == nil {
+		return fmt.Errorf("socks5 inbound is nil")
+	}
+	if inbound.Port == 0 {
+		return fmt.Errorf("socks5 port is required")
+	}
+
+	settings := Socks5ServiceConfig{}
+	if strings.TrimSpace(inbound.Settings) != "" {
+		if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+			return fmt.Errorf("parse socks5 inbound settings: %w", err)
+		}
+	}
+
+	settings.Username = strings.TrimSpace(settings.Username)
+	settings.Password = strings.TrimSpace(settings.Password)
+	if settings.Username == "" && settings.Password != "" {
+		return fmt.Errorf("socks5 username is required when password is set")
+	}
+	if settings.Username != "" && settings.Password == "" {
+		return fmt.Errorf("socks5 password is required when username is set")
+	}
+	if strings.ContainsAny(settings.Username, " \t\r\n") || strings.ContainsAny(settings.Password, " \t\r\n") {
+		return fmt.Errorf("socks5 credentials must not contain whitespace")
+	}
+	if strings.TrimSpace(settings.StatePath) == "" {
+		settings.StatePath = "/opt/trusttunnel/socks5-state.json"
+	}
+
+	if _, err := exec.LookPath("microsocks"); err != nil {
+		return fmt.Errorf("microsocks is not installed")
+	}
+	if err := os.MkdirAll(filepath.Dir(settings.StatePath), 0o755); err != nil {
+		return fmt.Errorf("create socks5 state dir: %w", err)
+	}
+
+	state := struct {
+		Port     int    `json:"port"`
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}{
+		Port:     inbound.Port,
+		Username: settings.Username,
+		Password: settings.Password,
+	}
+	body, err := json.MarshalIndent(state, "", "  ")
+	if err != nil {
+		return fmt.Errorf("encode socks5 state: %w", err)
+	}
+	if err := os.WriteFile(settings.StatePath, body, 0o600); err != nil {
+		return fmt.Errorf("write socks5 state: %w", err)
+	}
+
+	execStart := fmt.Sprintf("/usr/bin/microsocks -i 0.0.0.0 -p %d", inbound.Port)
+	if settings.Username != "" {
+		execStart = fmt.Sprintf("%s -u %s -P %s", execStart, settings.Username, settings.Password)
+	}
+
+	unit := fmt.Sprintf(`[Unit]
+Description=TrustTunnel SOCKS5 Access
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=%s
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target
+`, execStart)
+
+	if err := os.WriteFile("/etc/systemd/system/trusttunnel-socks5.service", []byte(unit), 0o644); err != nil {
+		return fmt.Errorf("write socks5 systemd unit: %w", err)
+	}
+
+	if err := exec.Command("systemctl", "daemon-reload").Run(); err != nil {
+		return fmt.Errorf("systemctl daemon-reload failed: %w", err)
+	}
+	if err := exec.Command("systemctl", "enable", "--now", "trusttunnel-socks5").Run(); err != nil {
+		return fmt.Errorf("systemctl enable trusttunnel-socks5 failed: %w", err)
+	}
+	if err := exec.Command("systemctl", "restart", "trusttunnel-socks5").Run(); err != nil {
+		return fmt.Errorf("systemctl restart trusttunnel-socks5 failed: %w", err)
+	}
+	return nil
+}
+
+func (s *ManagedTransportService) DisableSocks5() error {
+	if s.serviceState("trusttunnel-socks5") == "not-installed" {
+		return nil
+	}
+	return s.RunAction("trusttunnel-socks5", "stop")
 }
 
 func (s *ManagedTransportService) serviceState(unit string) string {

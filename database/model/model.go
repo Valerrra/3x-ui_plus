@@ -21,6 +21,7 @@ const (
 	Shadowsocks Protocol = "shadowsocks"
 	Mixed       Protocol = "mixed"
 	WireGuard   Protocol = "wireguard"
+	Socks5      Protocol = "socks5"
 	TrustTunnel Protocol = "trusttunnel"
 	MTProto     Protocol = "mtproto"
 )

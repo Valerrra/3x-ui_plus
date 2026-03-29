@@ -10,6 +10,7 @@ const Protocols = {
     TUN: 'tun',
     TRUSTTUNNEL: 'trusttunnel',
     MTPROTO: 'mtproto',
+    SOCKS5: 'socks5',
 };
 
 const SSMethods = {
@@ -1832,6 +1833,7 @@ Inbound.Settings = class extends XrayCommonClass {
             case Protocols.TUN: return new Inbound.TunSettings(protocol);
             case Protocols.TRUSTTUNNEL: return new Inbound.TrustTunnelSettings(protocol);
             case Protocols.MTPROTO: return new Inbound.MTProtoSettings(protocol);
+            case Protocols.SOCKS5: return new Inbound.Socks5Settings(protocol);
             default: return null;
         }
     }
@@ -1849,6 +1851,7 @@ Inbound.Settings = class extends XrayCommonClass {
             case Protocols.TUN: return Inbound.TunSettings.fromJson(json);
             case Protocols.TRUSTTUNNEL: return Inbound.TrustTunnelSettings.fromJson(json);
             case Protocols.MTPROTO: return Inbound.MTProtoSettings.fromJson(json);
+            case Protocols.SOCKS5: return Inbound.Socks5Settings.fromJson(json);
             default: return null;
         }
     }
@@ -2856,6 +2859,37 @@ Inbound.MTProtoSettings = class extends Inbound.Settings {
             secret: this.secret,
             configPath: this.configPath,
             frontingDomain: this.frontingDomain,
+        };
+    }
+};
+
+Inbound.Socks5Settings = class extends Inbound.Settings {
+    constructor(
+        protocol,
+        username = '',
+        password = '',
+        statePath = '/opt/trusttunnel/socks5-state.json',
+    ) {
+        super(protocol);
+        this.username = username;
+        this.password = password;
+        this.statePath = statePath;
+    }
+
+    static fromJson(json = {}) {
+        return new Inbound.Socks5Settings(
+            Protocols.SOCKS5,
+            json.username ?? '',
+            json.password ?? '',
+            json.statePath ?? '/opt/trusttunnel/socks5-state.json',
+        );
+    }
+
+    toJson() {
+        return {
+            username: this.username,
+            password: this.password,
+            statePath: this.statePath,
         };
     }
 };

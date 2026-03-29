@@ -452,116 +452,92 @@ func (s *ManagedTransportService) writeTrustTunnelRuntimeFiles(cfg *TrustTunnelS
 	if err := os.MkdirAll(filepath.Dir(credentialsFile), 0o755); err != nil {
 		return err
 	}
+	vpnBody := fmt.Sprintf(`# The address to listen on
+listen_address = %q
 
-	type vpnConfig struct {
-		ListenAddress   string `toml:"listen_address"`
-		CredentialsFile string `toml:"credentials_file"`
-	}
-	type hostEntry struct {
-		Hostname       string `toml:"hostname"`
-		CertChainPath  string `toml:"cert_chain_path"`
-		PrivateKeyPath string `toml:"private_key_path"`
-	}
-	type hostsConfig struct {
-		MainHosts []hostEntry `toml:"main_hosts"`
-	}
+# The path to a TOML file with endpoint users.
+credentials_file = %q
 
-	vpnBody, err := toml.Marshal(vpnConfig{
-		ListenAddress:   fmt.Sprintf("%s:%d", listenHost, cfg.ListenPort),
-		CredentialsFile: credentialsFile,
-	})
-	if err != nil {
-		return fmt.Errorf("encode vpn.toml: %w", err)
-	}
-	if err := os.WriteFile("/opt/trusttunnel/vpn.toml", vpnBody, 0o644); err != nil {
-		return err
-	}
-	hostsBody, err := toml.Marshal(hostsConfig{
-		MainHosts: []hostEntry{{
-			Hostname:       hostname,
-			CertChainPath:  certChainPath,
-			PrivateKeyPath: privateKeyPath,
-		}},
-	})
-	if err != nil {
-		return fmt.Errorf("encode hosts.toml: %w", err)
-	}
-	return os.WriteFile("/opt/trusttunnel/hosts.toml", hostsBody, 0o644)
-}
+# The path to a TOML file for connection filtering rules.
+rules_file = "/opt/trusttunnel/rules.toml"
 
-func (s *ManagedTransportService) updateTrustTunnelWebUIEnv(cfg *TrustTunnelServiceConfig) error {
-	envPath := "/opt/trusttunnel-suite/apps/webui/deploy/systemd/trusttunnel-webui.env"
-	if err := os.MkdirAll(filepath.Dir(envPath), 0o755); err != nil {
-		return err
-	}
-	envMap, err := readEnvFile(envPath)
-	if err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if envMap == nil {
-		envMap = map[string]string{}
-	}
-	publicAddress := strings.TrimSpace(cfg.PublicAddress)
-	if publicAddress == "" {
-		publicAddress = strings.TrimSpace(cfg.Hostname)
-	}
-	envMap["TT_WEBUI_ENDPOINT_PUBLIC_ADDRESS"] = publicAddress
-	return writeEnvFile(envPath, envMap)
-}
+# Whether IPv6 connections can be routed or rejected with unreachable status
+ipv6_available = true
 
-func (s *ManagedTransportService) DisableTrustTunnel() error {
-	if s.serviceState("trusttunnel") == "not-installed" {
-		return nil
-	}
-	return s.RunAction("trusttunnel", "stop")
-}
+# Whether connections to private network of the endpoint are allowed
+allow_private_network_connections = false
 
-func (s *ManagedTransportService) ApplyMTProtoInbound(inbound *model.Inbound) error {
-	if inbound == nil {
-		return fmt.Errorf("inbound is nil")
-	}
+# Timeout of an incoming TLS handshake. In seconds.
+tls_handshake_timeout_secs = 10
 
-	settings := struct {
-		Secret         string `json:"secret"`
-		ConfigPath     string `json:"configPath"`
-		FrontingDomain string `json:"frontingDomain"`
-	}{}
-	if strings.TrimSpace(inbound.Settings) != "" {
-		if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
-			return fmt.Errorf("parse MTProto inbound settings: %w", err)
-		}
-	}
+# Timeout of a client listener. In seconds.
+client_listener_timeout_secs = 600
 
-	cfgPath := strings.TrimSpace(settings.ConfigPath)
-	if cfgPath == "" {
-		cfgPath = "/opt/trusttunnel/access/mtproto.toml"
-	}
-	cfg := &MTProtoServiceConfig{
-		BindHost:      defaultString(strings.TrimSpace(inbound.Listen), "0.0.0.0"),
-		Port:          inbound.Port,
-		Secret:        settings.Secret,
-		ConfigPath:    cfgPath,
-		FrontingDomain: defaultString(strings.TrimSpace(settings.FrontingDomain), "www.cloudflare.com"),
-	}
-	if err := s.SaveMTProtoConfig(cfg); err != nil {
+# Timeout of outgoing connection establishment.
+connection_establishment_timeout_secs = 30
+
+# Idle timeout of tunneled TCP connections. In seconds.
+tcp_connections_timeout_secs = 604800
+
+# Timeout of tunneled UDP "connections". In seconds.
+udp_connections_timeout_secs = 300
+
+# Whether speedtest is available on the main hosts.
+speedtest_enable = false
+
+# Optional path prefix for speedtest requests on main hosts.
+speedtest_path = "/speedtest"
+
+# Whether ping is available on the main hosts.
+ping_enable = false
+
+# Optional path prefix for ping requests on main hosts.
+ping_path = "/ping"
+
+# HTTP status code returned on authentication failure.
+auth_failure_status_code = 407
+
+[forward_protocol]
+[forward_protocol.direct]
+
+[listen_protocols]
+
+[listen_protocols.http1]
+upload_buffer_size = 32768
+
+[listen_protocols.http2]
+initial_connection_window_size = 8388608
+initial_stream_window_size = 131072
+max_concurrent_streams = 1000
+max_frame_size = 16384
+header_table_size = 65536
+
+[listen_protocols.quic]
+recv_udp_payload_size = 1350
+send_udp_payload_size = 1350
+initial_max_data = 104857600
+initial_max_stream_data_bidi_local = 1048576
+initial_max_stream_data_bidi_remote = 1048576
+initial_max_stream_data_uni = 1048576
+initial_max_streams_bidi = 4096
+initial_max_streams_uni = 4096
+max_connection_window = 25165824
+max_stream_window = 16777216
+disable_active_migration = true
+enable_early_data = true
+message_queue_capacity = 4096
+`, fmt.Sprintf("%s:%d", listenHost, cfg.ListenPort), credentialsFile)
+	if err := os.WriteFile("/opt/trusttunnel/vpn.toml", []byte(vpnBody), 0o644); err != nil {
 		return err
 	}
 
-	settings.Secret = cfg.Secret
-	updatedSettings, err := json.Marshal(settings)
-	if err == nil {
-		inbound.Settings = string(updatedSettings)
-	}
-
-	if _, err := os.Stat("/usr/local/bin/mtg"); err == nil {
-		if err := s.ensureMTProtoUnit(cfgPath); err != nil {
-			return err
-		}
-		if s.serviceState("trusttunnel-mtproto") != "not-installed" {
-			if err := s.RunAction("trusttunnel-mtproto", "restart"); err != nil {
-				return err
-			}
-		}
+	hostsBody := fmt.Sprintf(`[[main_hosts]]
+hostname = %q
+cert_chain_path = %q
+private_key_path = %q
+`, hostname, certChainPath, privateKeyPath)
+	if err := os.WriteFile("/opt/trusttunnel/hosts.toml", []byte(hostsBody), 0o644); err != nil {
+		return err
 	}
 
 	return nil
@@ -738,12 +714,82 @@ func (s *ManagedTransportService) DetectTrustTunnelCertificatePaths(hostname str
 	return &TrustTunnelCertificatePaths{}, nil
 }
 
-func (s *ManagedTransportService) trustTunnelSetupWizardBinary() string {
-	return ""
+func (s *ManagedTransportService) updateTrustTunnelWebUIEnv(cfg *TrustTunnelServiceConfig) error {
+	envPath := "/opt/trusttunnel-suite/apps/webui/deploy/systemd/trusttunnel-webui.env"
+	if err := os.MkdirAll(filepath.Dir(envPath), 0o755); err != nil {
+		return err
+	}
+	envMap, err := readEnvFile(envPath)
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	if envMap == nil {
+		envMap = map[string]string{}
+	}
+	publicAddress := strings.TrimSpace(cfg.PublicAddress)
+	if publicAddress == "" {
+		publicAddress = strings.TrimSpace(cfg.Hostname)
+	}
+	envMap["TT_WEBUI_ENDPOINT_PUBLIC_ADDRESS"] = publicAddress
+	return writeEnvFile(envPath, envMap)
 }
 
-func (s *ManagedTransportService) generateTrustTunnelConfigs(cfg *TrustTunnelServiceConfig, bootstrapClient *TrustTunnelClient) error {
-	return fmt.Errorf("deprecated TrustTunnel bootstrap helper invoked unexpectedly")
+func (s *ManagedTransportService) DisableTrustTunnel() error {
+	if s.serviceState("trusttunnel") == "not-installed" {
+		return nil
+	}
+	return s.RunAction("trusttunnel", "stop")
+}
+
+func (s *ManagedTransportService) ApplyMTProtoInbound(inbound *model.Inbound) error {
+	if inbound == nil {
+		return fmt.Errorf("inbound is nil")
+	}
+
+	settings := struct {
+		Secret         string `json:"secret"`
+		ConfigPath     string `json:"configPath"`
+		FrontingDomain string `json:"frontingDomain"`
+	}{}
+	if strings.TrimSpace(inbound.Settings) != "" {
+		if err := json.Unmarshal([]byte(inbound.Settings), &settings); err != nil {
+			return fmt.Errorf("parse MTProto inbound settings: %w", err)
+		}
+	}
+
+	cfgPath := strings.TrimSpace(settings.ConfigPath)
+	if cfgPath == "" {
+		cfgPath = "/opt/trusttunnel/access/mtproto.toml"
+	}
+	cfg := &MTProtoServiceConfig{
+		BindHost:       defaultString(strings.TrimSpace(inbound.Listen), "0.0.0.0"),
+		Port:           inbound.Port,
+		Secret:         settings.Secret,
+		ConfigPath:     cfgPath,
+		FrontingDomain: defaultString(strings.TrimSpace(settings.FrontingDomain), "www.cloudflare.com"),
+	}
+	if err := s.SaveMTProtoConfig(cfg); err != nil {
+		return err
+	}
+
+	settings.Secret = cfg.Secret
+	updatedSettings, err := json.Marshal(settings)
+	if err == nil {
+		inbound.Settings = string(updatedSettings)
+	}
+
+	if _, err := os.Stat("/usr/local/bin/mtg"); err == nil {
+		if err := s.ensureMTProtoUnit(cfgPath); err != nil {
+			return err
+		}
+		if s.serviceState("trusttunnel-mtproto") != "not-installed" {
+			if err := s.RunAction("trusttunnel-mtproto", "restart"); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
 }
 
 func (s *ManagedTransportService) serviceState(unit string) string {
